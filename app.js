@@ -1,0 +1,47 @@
+'use strict';
+const KEY='reloj24-pce-v1';
+let solved=[],filter='all',selectedClass='all',current=null;
+const $=s=>document.querySelector(s);
+function clean(s){return String(s).toUpperCase().replace(/[^A-Z0-9]/g,'');}
+function normalizeIds(ids){if(!Array.isArray(ids))throw Error('Formato no válido');const out=[...new Set(ids)];if(out.some(x=>!Number.isInteger(x)||x<1||x>24))throw Error('Ventanas no válidas');if(out.some(id=>TASKS[id-1].requires.some(n=>!out.includes(n))))throw Error('La partida tiene ventanas sin sus pistas previas');return out.sort((a,b)=>a-b);}
+try{const raw=localStorage.getItem(KEY);if(raw)solved=normalizeIds(JSON.parse(raw));}catch(e){solved=[];}
+function persist(){try{localStorage.setItem(KEY,JSON.stringify(solved));}catch(e){toast('No se pudo guardar. Descarga una copia del progreso.');}}
+function ready(t){return t.requires.every(n=>solved.includes(n));}
+function toast(s){$('#toast').textContent=s;$('#toast').classList.remove('hidden');clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').classList.add('hidden'),4800);}
+function shortGroup(t){return t.group.replace('Matemáticas ','Mates ').replace('Misión compartida','Misión final');}
+function artwork(t){return ['math-tree','matrix-gift','physics-planet','chem-flask','bio-dna','math-geometry','probability-dice','physics-light','chem-molecule','bio-cell','matrix-gift','math-tree','physics-planet','chem-molecule','bio-cell','probability-dice','math-geometry','physics-light','chem-flask','bio-dna','final-compass','chem-molecule','final-compass','final-star'][t.id-1];}
+function render(){
+ $('#windows').replaceChildren();
+ const visible=TASKS.filter(t=>(selectedClass==='all'||t.group===selectedClass)&&(filter==='all'||filter==='done'&&solved.includes(t.id)||filter==='ready'&&ready(t)&&!solved.includes(t.id)));
+ visible.forEach(t=>{const done=solved.includes(t.id),locked=!ready(t);const b=document.createElement('button');b.className='window'+(done?' done':'')+(locked?' locked':'')+(t.id>20?' final':'');b.setAttribute('aria-label',`Ventana ${t.id}. ${t.title}. ${done?'Iluminada':locked?'Necesita pistas previas':'Disponible'}`);const n=document.createElement('span');n.className='number';n.textContent=String(t.id).padStart(2,'0');const art=document.createElement('img');art.src='assets/'+artwork(t)+'.svg';art.className='window-art';art.alt='';art.setAttribute('aria-hidden','true');const tag=document.createElement('span');tag.className='tag';tag.textContent=shortGroup(t);const mark=document.createElement('span');mark.className='mark';mark.textContent=done?'✓':locked?'◇':'✧';b.append(n,art,tag,mark);b.onclick=()=>openPuzzle(t.id);$('#windows').append(b);});
+ $('#no-results').classList.toggle('hidden',visible.length>0);$('#count').textContent=solved.length;$('#bar').style.width=(solved.length/24*100)+'%';$('#mobile-progress').textContent=`${solved.length} de 24 ventanas iluminadas`;$('#house-star').classList.toggle('lit',solved.includes(24));
+ $('#inventory').replaceChildren();if(!solved.length){const p=document.createElement('p');p.className='empty';p.textContent='La primera pista espera detrás de una ventana. Aquí conservaréis todos los hallazgos.';$('#inventory').append(p);}else solved.slice().sort((a,b)=>b-a).forEach(id=>{const t=TASKS[id-1];const d=document.createElement('div');d.className='item';const b=document.createElement('b');b.textContent='Ventana '+id+(t.destination?' → '+t.destination:'');const p=document.createElement('p');p.textContent=t.reward;d.append(b,p);$('#inventory').append(d);});
+}
+function el(tag,text,cls){const n=document.createElement(tag);n.textContent=text;if(cls)n.className=cls;return n;}
+function openPuzzle(id){
+ current=id;const t=TASKS[id-1],body=$('#modal-content');$('#puzzle').style.setProperty('--modal-art',`url('assets/${artwork(t)}.svg')`);$('#modal-tag').textContent=`Ventana ${String(id).padStart(2,'0')} · ${t.group}`;$('#modal-title').textContent=t.title;$('#modal-person').textContent=t.character;body.replaceChildren();
+ if(!ready(t)){body.append(el('p','Esta ventana necesita los hallazgos de otras clases. Mientras llegan, podéis continuar con las ventanas disponibles.','scene'));body.append(el('div','Faltan las ventanas: '+t.requires.filter(n=>!solved.includes(n)).join(', ')+'.','notice'));}
+ else{
+  body.append(el('p',t.scene,'scene'));
+  if(id<=20){body.append(el('div',`Material físico: sobre ${id}, tablero y cuatro tarjetas recortables.`,'notice'));if(t.reading){const strip=el('div','','strip');strip.append(el('span','Ruta del alero · casillas del tablero','small'));strip.append(el('strong',t.reading));body.append(strip);}else body.append(el('div',`Necesitáis físicamente la tira de la ventana ${t.donor}. Encajad primero las tarjetas y después seguid su ruta.`,'strip'));}
+  if(!solved.includes(id)){
+   body.append(el('div','','divider'));const form=document.createElement('form');const label=el('label',id===21?'Orientación descubierta':id===22?'Instrucción completa':'Código descubierto');label.htmlFor='code';const row=el('div','','code-row'),input=document.createElement('input');input.id='code';input.type='text';input.autocomplete='off';input.spellcheck=false;input.maxLength=70;input.required=true;input.setAttribute('aria-describedby','feedback');if(id!==21&&id!==22)input.inputMode='numeric';const submit=el('button','Iluminar ventana','primary');submit.type='submit';row.append(input,submit);const feedback=el('div','','feedback');feedback.id='feedback';feedback.setAttribute('role','status');form.append(label,row,feedback);form.onsubmit=async e=>{e.preventDefault();submit.disabled=true;try{const hash=await digest(clean(input.value));if(hash===t.hash){if(!solved.includes(id))solved.push(id);persist();render();openPuzzle(id);toast('Ventana '+id+' iluminada. Recoged vuestra recompensa.');}else{feedback.textContent='La cerradura sigue cerrada. Revisad las tarjetas y el orden de lectura.';input.select();}}catch(err){feedback.textContent='El navegador no pudo comprobar el código. Usa un navegador actualizado o abre la versión web.';}finally{submit.disabled=false;}};body.append(form);
+   const hint=el('button','Necesitamos una pista','hint');hint.type='button';hint.onclick=()=>{hint.replaceWith(el('div',t.hint,'notice'));};body.append(hint);
+  }else{
+   const success=el('div','','success');success.append(el('h3','Una luz más en la casa'));success.append(el('p',t.reward));if(t.destination)success.append(el('p',`Pedid a la profesora la recompensa física de esta ventana y depositadla en el sobre ${t.destination}.`,'small'));body.append(success);
+   if(id===24){const f=el('div','','final-scene');f.style.marginTop='20px';f.append(el('strong','La Navidad vuelve a latir.'));f.append(el('p','El reloj recupera su pulso. Tras las veinticuatro ventanas, los habitantes encienden sus luces. Ninguna clase tenía todas las respuestas: cada pieza encontró su lugar gracias a las demás.'));f.append(el('p','Diez clases. Una sola casa.'));body.append(f);}
+  }
+ }
+ if(!$('#puzzle').open)$('#puzzle').showModal();
+ if(ready(t)&&!solved.includes(id))setTimeout(()=>$('#code')?.focus(),40);
+}
+async function digest(s){let h=2166136261;for(let i=0;i<s.length;i++)h=Math.imul(h^s.charCodeAt(i),16777619)>>>0;return h.toString(16).padStart(8,'0');}
+[...new Set(TASKS.map(t=>t.group))].forEach(group=>{const o=document.createElement('option');o.value=group;o.textContent=group;$('#class-filter').append(o);});
+document.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{filter=b.dataset.filter;document.querySelectorAll('[data-filter]').forEach(x=>x.classList.toggle('active',x===b));render();});
+$('#class-filter').onchange=e=>{selectedClass=e.target.value;render();};
+$('#close-puzzle').onclick=()=>$('#puzzle').close();$('#manage').onclick=()=>{$('#reset-area').classList.add('hidden');$('#settings').showModal();};$('#close-settings').onclick=()=>$('#settings').close();
+$('#export').onclick=()=>{const data={game:'reloj24-pce',version:1,exported:new Date().toISOString(),solved:solved.slice().sort((a,b)=>a-b)};const u=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=u;a.download='reloj24-progreso.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);};
+$('#import').onclick=()=>$('#file-input').click();$('#file-input').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{if(f.size>100000)throw Error('El archivo es demasiado grande');const d=JSON.parse(await f.text());if(d.game!=='reloj24-pce'||d.version!==1)throw Error('No es una partida de este calendario');const ids=normalizeIds(d.solved);const merged=normalizeIds([...solved,...ids]);solved=merged;persist();render();toast('Partida importada. Se han conservado también tus ventanas actuales.');}catch(err){toast('No se pudo importar: '+err.message);}finally{e.target.value='';}};
+$('#reset').onclick=()=>$('#reset-area').classList.remove('hidden');$('#cancel-reset').onclick=()=>$('#reset-area').classList.add('hidden');$('#confirm-reset').onclick=()=>{solved=[];persist();filter='all';selectedClass='all';$('#class-filter').value='all';document.querySelectorAll('[data-filter]').forEach(x=>x.classList.toggle('active',x.dataset.filter==='all'));render();$('#settings').close();toast('Calendario reiniciado.');};
+$('#instructions').onclick=()=>{toast('Abre el PDF de la guía docente: incluye montaje, reparto, soluciones y las recompensas recortables.');};
+render();
